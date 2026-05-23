@@ -1,0 +1,27 @@
+﻿id_resultado,categoria_resultado,tipo_resultado,comprovante_entrega,exemplos
+R001,Bases de Conhecimento,Base Biotecnológica,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Marcador molecular; biblioteca de genes/promotores; construção gênica
+R002,Bases de Conhecimento,Banco de Dados,"Obrigatório: Informações Organizadas e Disponibilizadas (Alelo, Geoinfo, Redape ou Siexp)",Banco de dados espaciais; banco de imagens; dados climáticos
+R003,Bases de Conhecimento,Coleção Biológica,Obrigatório: Informações Organizadas e Disponibilizadas (Alelo),Banco de germoplasma; coleção de microrganismos; núcleo de conservação animal
+R004,Bases de Conhecimento,Informação Científica,Obrigatório: Publicação Técnica e/ou Científica,Teores de nutrientes; diversidade genética; diagnóstico florestal
+R005,Tecnologias,Prática Agropecuária,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica (sugerido: Relatório de Qualificação),Manejo de irrigação; manejo de pragas; recuperação de áreas degradadas
+R006,Tecnologias,Cultivar,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica (sugerido: Relatório de Qualificação),Cultivar convencional; transgênica; editada; híbrido
+R007,Tecnologias,"Reprodutor, Matriz ou Linhagem Animal",Mesmo acima,Linhagem de aves; matriz bovina; reprodutor caprino
+R008,Tecnologias,"Processo para Produção, Fabricação ou Extração",Mesmo acima,Processo para produção de inoculante; alimento; fertilizante
+R009,Tecnologias,Produto Agropecuário ou Industrial,Mesmo acima,Vacina; bioinsumo; inoculante; fertilizante
+R010,Tecnologias,"Máquina, Implemento ou Equipamento",Mesmo acima,Drone; implemento agrícola; equipamento analítico
+R011,Tecnologias,Metodologia Técnico-Científica,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Metodologia para análises genômicas; análise de alimentos
+R012,Tecnologias,Software para Clientes Externos,Mesmo acima,Software web; desktop; móvel; SaaS
+R013,Tecnologias,Procedimento Informatizado,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Planilhas automatizadas; formulários executáveis
+R014,Tecnologias,Ativo Cartográfico,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Mapeamento; monitoramento; zoneamento
+R015,Tecnologias,Sistema Agropecuário e Florestal,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,ILPF; sistemas agroflorestais
+R016,Inserção em Ambientes de Inovação,"Avaliação de Sistemas Produtivos, Socioeconômicos e Ecológicos",Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Avaliação de impacto; sustentabilidade; desempenho
+R017,Inserção em Ambientes de Inovação,"Contribuição à Formulação, ao Acesso, à Integração e à Execução de Políticas Públicas",Mesmo acima,Notas técnicas; subsídios a políticas
+R018,Inserção em Ambientes de Inovação,Arranjo Institucional e/ou Arranjos para Inovação Colaborativa,Mesmo acima,Parcerias; redes; acordos
+R019,Inserção em Ambientes de Inovação,Capacitação e Comunicação para Desenvolvimento e Transferência de Tecnologia,Obrigatório: Informações Organizadas e Disponibilizadas (AGE),Treinamentos; dias de campo
+R020,Inserção em Ambientes de Inovação,Melhoria e Atualização Tecnológica,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Atualização de tecnologias
+R021,Base Sociotécnica,Conservação e Uso da Agro e Sociobiodiversidade,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Uso de recursos genéticos; conservação
+R022,Base Sociotécnica,Redesenho de Agroecossistemas,Mesmo acima,Sistemas regenerativos; transição agroecológica
+R023,Base Sociotécnica,Territórios e Sistemas Agroalimentares,Mesmo acima,Indicações geográficas; cadeias territoriais
+R024,Desenvolvimento Organizacional,Software Institucional,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Sistema corporativo; API interna
+R025,Desenvolvimento Organizacional,Capacitação Organizacional,Obrigatório: Informações Organizadas e Disponibilizadas (ERP-SAP),Capacitação interna estratégica
+R026,Desenvolvimento Organizacional,Metodologia com Fins Organizacionais e Gerenciais,Documento/Instrumento Institucional; Informações Organizadas e Disponibilizadas; Publicação Técnica e/ou Científica,Gestão de riscos; metodologia gerencial

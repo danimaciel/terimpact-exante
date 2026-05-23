@@ -2,9 +2,11 @@ import os
 import json
 from io import BytesIO
 from datetime import datetime
+from uuid import uuid4
 
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 
 st.set_page_config(
@@ -20,6 +22,37 @@ UNIDADES_CSV = "unidades.csv"
 AREAS_CSV = "areas_tematicas.csv"
 PARCEIROS_CSV = "parceiros.csv"
 PUBLICOS_CSV = "publicos.csv"
+EMPREGADOS_CSV = "empregados.csv"
+RESULTADOS_CSV = "resultados_embrapa.csv"
+
+
+def gerar_id_proposta():
+    data = datetime.now().strftime("%Y%m%d")
+    sufixo = uuid4().hex[:8].upper()
+    return f"TER-{data}-{sufixo}"
+
+TIPOS_PROPOSTA = [
+    "",
+    "Pesquisa científica",
+    "Desenvolvimento metodológico",
+    "Plataforma de dados",
+    "Sistema de monitoramento",
+    "Suporte a políticas públicas",
+    "Outro",
+]
+
+PORTFOLIOS = [
+    "",
+    "Sistemas de Produção Sustentáveis e Resilientes",
+    "Clima, recursos naturais e transformação ecológica",
+    "Protagonismo do consumidor",
+    "Bioeficiência na agropecuária",
+    "Economia da biodiversidade",
+    "Economia verde",
+    "Agroecologia e Inclusão Socioprodutiva",
+    "Biorrevolução",
+    "Transformação digital na agropecuária",
+]
 
 # =========================================================
 # LEITURA DAS TABELAS-BASE
@@ -39,6 +72,8 @@ df_unidades = carregar_tabela("unidades.csv")
 df_areas = carregar_tabela("areas_tematicas.csv")
 df_parceiros = carregar_tabela("parceiros.csv")
 df_publicos = carregar_tabela("publicos.csv")
+df_empregados = carregar_tabela("empregados.csv")
+df_resultados = carregar_tabela("resultados_embrapa.csv")
 
 # =========================================================
 # SESSION STATE
@@ -51,16 +86,28 @@ if "scores" not in st.session_state:
 
 if "cadastro" not in st.session_state:
     st.session_state.cadastro = {
-        "id_proposta": "",
+        "id_proposta": gerar_id_proposta(),
         "titulo": "",
         "proponente": "",
         "equipe": "",
+        "ids_equipe": [],
+        "nomes_equipe": [],
         "id_unidade": "",
         "nome_unidade": "",
         "id_area_tematica": "",
         "nome_area_tematica": "",
         "portfolio": "",
         "tipo_proposta": "",
+        "ids_resultados": [],
+        "categorias_resultados": [],
+        "tipos_resultados": [],
+        "comprovantes_resultados": [],
+        "exemplos_resultados": [],
+        "id_resultado": "",
+        "categoria_resultado": "",
+        "tipo_resultado": "",
+        "comprovante_resultado": "",
+        "exemplos_resultado": "",
         "duracao_meses": 36,
         "valor_solicitado": 0.0,
         "ids_parceiros": [],
@@ -68,6 +115,8 @@ if "cadastro" not in st.session_state:
         "ids_publicos": [],
         "nomes_publicos": [],
         "resumo": "",
+        "anotacoes": "",
+        "consideracoes": "",
         "data_avaliacao": "",
     }
 
@@ -76,6 +125,9 @@ if "resultados_calculados" not in st.session_state:
 
 if "avaliacao_salva" not in st.session_state:
     st.session_state.avaliacao_salva = False
+
+if "anotacoes_indicadores" not in st.session_state:
+    st.session_state.anotacoes_indicadores = {}
 
 # =========================================================
 # QUESTÕES
@@ -115,17 +167,20 @@ DIMENSOES = [
 for q in QUESTOES:
     if q["codigo"] not in st.session_state.scores:
         st.session_state.scores[q["codigo"]] = 3
+    if q["codigo"] not in st.session_state.anotacoes_indicadores:
+        st.session_state.anotacoes_indicadores[q["codigo"]] = ""
 
 # =========================================================
 # FUNÇÕES
 # =========================================================
 def validar_cadastro(cadastro):
     obrigatorios = {
-        "id_proposta": "ID da proposta",
         "titulo": "Título",
         "proponente": "Proponente",
+        "nomes_equipe": "Equipe responsável",
         "nome_unidade": "Unidade",
         "nome_area_tematica": "Área temática",
+        "tipos_resultados": "Resultado esperado",
         "resumo": "Resumo executivo",
     }
     faltantes = []
@@ -195,7 +250,8 @@ def gerar_radar(dim_scores):
     return fig
 
 
-def montar_dataframe_respostas(scores_dict):
+def montar_dataframe_respostas(scores_dict, anotacoes_dict=None):
+    anotacoes_dict = anotacoes_dict or {}
     linhas = []
     for q in QUESTOES:
         nota = scores_dict[q["codigo"]]
@@ -206,6 +262,7 @@ def montar_dataframe_respostas(scores_dict):
                 "Pergunta": q["pergunta"],
                 "Nota": nota,
                 "Descrição da resposta": q["opcoes"][nota],
+                "Anotações": anotacoes_dict.get(q["codigo"], ""),
             }
         )
     return pd.DataFrame(linhas)
@@ -221,9 +278,35 @@ def exportar_excel(df_respostas, df_dimensoes, df_resumo, cadastro):
     return output.getvalue()
 
 
+def montar_resumo_cadastro(cadastro):
+    return pd.DataFrame(
+        [
+            {"Campo": "Identificador automático", "Valor": cadastro.get("id_proposta", "")},
+            {"Campo": "Título", "Valor": cadastro.get("titulo", "")},
+            {"Campo": "Proponente", "Valor": cadastro.get("proponente", "")},
+            {"Campo": "Equipe", "Valor": " | ".join(cadastro.get("nomes_equipe", [])) or cadastro.get("equipe", "")},
+            {"Campo": "Unidade", "Valor": cadastro.get("nome_unidade", "")},
+            {"Campo": "Área temática", "Valor": cadastro.get("nome_area_tematica", "")},
+            {"Campo": "Portfólio / programa", "Valor": cadastro.get("portfolio", "")},
+            {"Campo": "Tipo de proposta", "Valor": cadastro.get("tipo_proposta", "")},
+            {"Campo": "Resultados esperados", "Valor": " | ".join(cadastro.get("tipos_resultados", [])) or cadastro.get("tipo_resultado", "")},
+            {"Campo": "Parceiros principais", "Valor": " | ".join(cadastro.get("nomes_parceiros", []))},
+            {"Campo": "Públicos-alvo", "Valor": " | ".join(cadastro.get("nomes_publicos", []))},
+            {"Campo": "Data da avaliação", "Valor": cadastro.get("data_avaliacao", "")},
+        ]
+    )
+
+
 def montar_linha_historico(cadastro, scores, dim_scores, indices):
     linha = {}
     linha.update(cadastro)
+    linha["ids_equipe"] = " | ".join(cadastro.get("ids_equipe", []))
+    linha["nomes_equipe"] = " | ".join(cadastro.get("nomes_equipe", []))
+    linha["ids_resultados"] = " | ".join(cadastro.get("ids_resultados", []))
+    linha["categorias_resultados"] = " | ".join(cadastro.get("categorias_resultados", []))
+    linha["tipos_resultados"] = " | ".join(cadastro.get("tipos_resultados", []))
+    linha["comprovantes_resultados"] = " | ".join(cadastro.get("comprovantes_resultados", []))
+    linha["exemplos_resultados"] = " | ".join(cadastro.get("exemplos_resultados", []))
     linha["ids_parceiros"] = " | ".join(cadastro.get("ids_parceiros", []))
     linha["nomes_parceiros"] = " | ".join(cadastro.get("nomes_parceiros", []))
     linha["ids_publicos"] = " | ".join(cadastro.get("ids_publicos", []))
@@ -234,6 +317,7 @@ def montar_linha_historico(cadastro, scores, dim_scores, indices):
         codigo = q["codigo"]
         linha[f"score_{codigo}"] = scores[codigo]
         linha[f"desc_{codigo}"] = q["opcoes"][scores[codigo]]
+        linha[f"anotacao_{codigo}"] = st.session_state.anotacoes_indicadores.get(codigo, "")
 
     for dim, valor in dim_scores.items():
         linha[f"dim_{dim}"] = valor
@@ -258,6 +342,55 @@ def salvar_historico_csv(cadastro, scores, dim_scores, indices, caminho_csv=HIST
     return df_final
 
 
+def obter_config_supabase():
+    try:
+        url = st.secrets.get("SUPABASE_URL", "")
+        chave = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", "") or st.secrets.get("SUPABASE_ANON_KEY", "")
+        tabela = st.secrets.get("SUPABASE_TABLE", "avaliacoes")
+    except Exception:
+        return None
+
+    if not url or not chave:
+        return None
+
+    return {
+        "url": url.rstrip("/"),
+        "chave": chave,
+        "tabela": tabela,
+    }
+
+
+def salvar_historico_supabase(cadastro, scores, dim_scores, indices):
+    config = obter_config_supabase()
+    if not config:
+        return False, "Supabase não configurado em st.secrets."
+
+    payload = {
+        "id_proposta": cadastro.get("id_proposta", ""),
+        "titulo": cadastro.get("titulo", ""),
+        "proponente": cadastro.get("proponente", ""),
+        "cadastro": cadastro,
+        "scores": scores,
+        "anotacoes_indicadores": st.session_state.anotacoes_indicadores,
+        "dim_scores": dim_scores,
+        "indices": indices,
+    }
+    endpoint = f"{config['url']}/rest/v1/{config['tabela']}"
+    headers = {
+        "apikey": config["chave"],
+        "Authorization": f"Bearer {config['chave']}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+    try:
+        resposta = requests.post(endpoint, headers=headers, json=payload, timeout=15)
+        resposta.raise_for_status()
+        return True, "Avaliação salva no Supabase."
+    except requests.RequestException as erro:
+        return False, f"Não foi possível salvar no Supabase: {erro}"
+
+
 def carregar_historico(caminho_csv=HISTORICO_CSV):
     if os.path.exists(caminho_csv):
         return pd.read_csv(caminho_csv)
@@ -269,16 +402,28 @@ def resetar_avaliacao():
     st.session_state.resultados_calculados = False
     st.session_state.avaliacao_salva = False
     st.session_state.cadastro = {
-        "id_proposta": "",
+        "id_proposta": gerar_id_proposta(),
         "titulo": "",
         "proponente": "",
         "equipe": "",
+        "ids_equipe": [],
+        "nomes_equipe": [],
         "id_unidade": "",
         "nome_unidade": "",
         "id_area_tematica": "",
         "nome_area_tematica": "",
         "portfolio": "",
         "tipo_proposta": "",
+        "ids_resultados": [],
+        "categorias_resultados": [],
+        "tipos_resultados": [],
+        "comprovantes_resultados": [],
+        "exemplos_resultados": [],
+        "id_resultado": "",
+        "categoria_resultado": "",
+        "tipo_resultado": "",
+        "comprovante_resultado": "",
+        "exemplos_resultado": "",
         "duracao_meses": 36,
         "valor_solicitado": 0.0,
         "ids_parceiros": [],
@@ -286,9 +431,12 @@ def resetar_avaliacao():
         "ids_publicos": [],
         "nomes_publicos": [],
         "resumo": "",
+        "anotacoes": "",
+        "consideracoes": "",
         "data_avaliacao": "",
     }
     st.session_state.scores = {q["codigo"]: 3 for q in QUESTOES}
+    st.session_state.anotacoes_indicadores = {q["codigo"]: "" for q in QUESTOES}
 
 
 # =========================================================
@@ -296,7 +444,7 @@ def resetar_avaliacao():
 # =========================================================
 dim_scores = calcular_dimensoes(st.session_state.scores)
 indices = calcular_indices(dim_scores)
-df_respostas = montar_dataframe_respostas(st.session_state.scores)
+df_respostas = montar_dataframe_respostas(st.session_state.scores, st.session_state.anotacoes_indicadores)
 df_dimensoes = pd.DataFrame([{"Dimensão": k, "Pontuação média": v} for k, v in dim_scores.items()])
 df_resumo = pd.DataFrame([indices])
 df_historico = carregar_historico()
@@ -342,11 +490,41 @@ if st.session_state.etapa == 1:
     if not df_publicos.empty:
         publicos_opcoes = dict(zip(df_publicos["nome_publico"], df_publicos["id_publico"]))
 
+    empregados_opcoes = {}
+    if not df_empregados.empty:
+        empregados_opcoes = dict(zip(df_empregados["nome_empregado"], df_empregados["id_empregado"]))
+
+    resultados_opcoes = {}
+    if not df_resultados.empty:
+        resultados_opcoes = dict(zip(df_resultados["tipo_resultado"], df_resultados["id_resultado"]))
+
     with col1:
-        id_proposta = st.text_input("ID da proposta", value=cadastro_atual["id_proposta"])
         titulo = st.text_input("Título da proposta", value=cadastro_atual["titulo"])
-        proponente = st.text_input("Nome do proponente", value=cadastro_atual["proponente"])
-        equipe = st.text_input("Equipe responsável", value=cadastro_atual["equipe"])
+
+        if empregados_opcoes:
+            nomes_empregados = list(empregados_opcoes.keys())
+            proponente = st.selectbox(
+                "Nome do proponente",
+                options=[""] + nomes_empregados,
+                index=([""] + nomes_empregados).index(cadastro_atual["proponente"])
+                if cadastro_atual["proponente"] in ([""] + nomes_empregados) else 0
+            )
+            equipe_sel = st.multiselect(
+                "Equipe responsável",
+                options=nomes_empregados,
+                default=[
+                    nome for nome in cadastro_atual.get("nomes_equipe", [])
+                    if nome in nomes_empregados
+                ],
+            )
+            if equipe_sel:
+                colunas_equipe = ["nome_empregado", "cargo", "funcao"]
+                equipe_preview = df_empregados[df_empregados["nome_empregado"].isin(equipe_sel)][colunas_equipe]
+                st.dataframe(equipe_preview, width="stretch", hide_index=True)
+        else:
+            proponente = st.text_input("Nome do proponente", value=cadastro_atual["proponente"])
+            equipe_texto = st.text_input("Equipe responsável (tabela não carregada)", value=cadastro_atual["equipe"])
+            equipe_sel = [nome.strip() for nome in equipe_texto.split(";") if nome.strip()]
 
         if unidades_opcoes:
             nomes_unidades = list(unidades_opcoes.keys())
@@ -371,13 +549,50 @@ if st.session_state.etapa == 1:
             area_sel = st.text_input("Área temática (tabela não carregada)", value=cadastro_atual["nome_area_tematica"])
 
     with col2:
-        portfolio = st.text_input("Portfólio / programa", value=cadastro_atual["portfolio"])
+        portfolio = st.selectbox(
+            "Portfólio / programa",
+            PORTFOLIOS,
+            index=PORTFOLIOS.index(cadastro_atual["portfolio"])
+            if cadastro_atual["portfolio"] in PORTFOLIOS else 0,
+        )
         tipo_proposta = st.selectbox(
             "Tipo de proposta",
-            ["", "Pesquisa", "Desenvolvimento", "Inovação", "Serviço", "Outro"],
-            index=["", "Pesquisa", "Desenvolvimento", "Inovação", "Serviço", "Outro"].index(cadastro_atual["tipo_proposta"])
-            if cadastro_atual["tipo_proposta"] in ["", "Pesquisa", "Desenvolvimento", "Inovação", "Serviço", "Outro"] else 0,
+            TIPOS_PROPOSTA,
+            index=TIPOS_PROPOSTA.index(cadastro_atual["tipo_proposta"])
+            if cadastro_atual["tipo_proposta"] in TIPOS_PROPOSTA else 0,
         )
+
+        resultados_sel = []
+        resultados_info = []
+        if resultados_opcoes:
+            nomes_resultados = list(resultados_opcoes.keys())
+            resultados_padrao = cadastro_atual.get("tipos_resultados") or (
+                [cadastro_atual.get("tipo_resultado")]
+                if cadastro_atual.get("tipo_resultado") in nomes_resultados else []
+            )
+            resultados_sel = st.multiselect(
+                "Resultados esperados",
+                options=nomes_resultados,
+                default=[r for r in resultados_padrao if r in nomes_resultados],
+            )
+            if resultados_sel:
+                resultados_info = (
+                    df_resultados[df_resultados["tipo_resultado"].isin(resultados_sel)]
+                    .sort_values("tipo_resultado")
+                    .to_dict("records")
+                )
+                st.dataframe(
+                    pd.DataFrame(resultados_info)[
+                        ["categoria_resultado", "tipo_resultado", "comprovante_entrega", "exemplos"]
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                )
+        else:
+            resultado_texto = st.text_input("Resultados esperados (tabela não carregada)", value=cadastro_atual["tipo_resultado"])
+            resultados_sel = [r.strip() for r in resultado_texto.split(";") if r.strip()]
+            resultados_info = [{"tipo_resultado": r} for r in resultados_sel]
+
         duracao_meses = st.number_input("Duração prevista (meses)", min_value=0, value=int(cadastro_atual["duracao_meses"]))
         valor_solicitado = st.number_input("Valor solicitado (R$)", min_value=0.0, value=float(cadastro_atual["valor_solicitado"]))
 
@@ -386,7 +601,7 @@ if st.session_state.etapa == 1:
             parceiros_sel = st.multiselect(
                 "Parceiros principais",
                 options=nomes_parceiros,
-                default=cadastro_atual["nomes_parceiros"]
+                default=[p for p in cadastro_atual["nomes_parceiros"] if p in nomes_parceiros]
             )
         else:
             parceiros_sel = []
@@ -396,25 +611,64 @@ if st.session_state.etapa == 1:
             publicos_sel = st.multiselect(
                 "Públicos-alvo",
                 options=nomes_publicos,
-                default=cadastro_atual["nomes_publicos"]
+                default=[p for p in cadastro_atual["nomes_publicos"] if p in nomes_publicos]
             )
         else:
             publicos_sel = []
 
     resumo = st.text_area("Resumo executivo da proposta", height=180, value=cadastro_atual["resumo"])
+    anotacoes = st.text_area(
+        "Anotações sobre a proposta",
+        height=120,
+        value=cadastro_atual.get("anotacoes", ""),
+        placeholder="Registre pontos de atenção, dúvidas, hipóteses ou informações úteis para a avaliação.",
+    )
+    consideracoes = st.text_area(
+        "Considerações adicionais",
+        height=120,
+        value=cadastro_atual.get("consideracoes", ""),
+        placeholder="Inclua observações finais, ressalvas metodológicas ou recomendações preliminares.",
+    )
 
     if st.button("Salvar dados e continuar para avaliação"):
+        id_proposta = cadastro_atual.get("id_proposta") or gerar_id_proposta()
+        ids_resultados = [r.get("id_resultado", "") for r in resultados_info if r.get("id_resultado", "")]
+        categorias_resultados = [r.get("categoria_resultado", "") for r in resultados_info if r.get("categoria_resultado", "")]
+        tipos_resultados = [r.get("tipo_resultado", "") for r in resultados_info if r.get("tipo_resultado", "")]
+        comprovantes_resultados = [
+            r.get("comprovante_entrega", r.get("comprovante_resultado", ""))
+            for r in resultados_info
+            if r.get("comprovante_entrega", r.get("comprovante_resultado", ""))
+        ]
+        exemplos_resultados = [
+            r.get("exemplos", r.get("exemplos_resultado", ""))
+            for r in resultados_info
+            if r.get("exemplos", r.get("exemplos_resultado", ""))
+        ]
+
         novo_cadastro = {
             "id_proposta": id_proposta,
             "titulo": titulo,
             "proponente": proponente,
-            "equipe": equipe,
+            "equipe": " | ".join(equipe_sel),
+            "ids_equipe": [empregados_opcoes[p] for p in equipe_sel] if empregados_opcoes else [],
+            "nomes_equipe": equipe_sel,
             "id_unidade": unidades_opcoes.get(unidade_sel, "") if unidades_opcoes else "",
             "nome_unidade": unidade_sel,
             "id_area_tematica": areas_opcoes.get(area_sel, "") if areas_opcoes else "",
             "nome_area_tematica": area_sel,
             "portfolio": portfolio,
             "tipo_proposta": tipo_proposta,
+            "ids_resultados": ids_resultados,
+            "categorias_resultados": categorias_resultados,
+            "tipos_resultados": tipos_resultados,
+            "comprovantes_resultados": comprovantes_resultados,
+            "exemplos_resultados": exemplos_resultados,
+            "id_resultado": " | ".join(ids_resultados),
+            "categoria_resultado": " | ".join(categorias_resultados),
+            "tipo_resultado": " | ".join(tipos_resultados),
+            "comprovante_resultado": " | ".join(comprovantes_resultados),
+            "exemplos_resultado": " | ".join(exemplos_resultados),
             "duracao_meses": duracao_meses,
             "valor_solicitado": valor_solicitado,
             "ids_parceiros": [parceiros_opcoes[p] for p in parceiros_sel] if parceiros_opcoes else [],
@@ -422,6 +676,8 @@ if st.session_state.etapa == 1:
             "ids_publicos": [publicos_opcoes[p] for p in publicos_sel] if publicos_opcoes else [],
             "nomes_publicos": publicos_sel,
             "resumo": resumo,
+            "anotacoes": anotacoes,
+            "consideracoes": consideracoes,
             "data_avaliacao": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
 
@@ -444,7 +700,7 @@ if st.session_state.etapa == 1:
                 "timestamp_salvamento", "id_proposta", "titulo", "proponente",
                 "nome_unidade", "nome_area_tematica", "indice_estrategico", "classificacao"
             ] if c in df_historico.columns]
-            st.dataframe(df_historico[colunas_visiveis], use_container_width=True)
+            st.dataframe(df_historico[colunas_visiveis], width="stretch")
 
 # =========================================================
 # ETAPA 2
@@ -475,6 +731,16 @@ elif st.session_state.etapa == 2:
             with st.expander("Ver rubrica / âncora da questão"):
                 for nota, texto in opcao_formatada.items():
                     st.write(f"{nota}: {texto}")
+
+            with st.expander(f"Anotações do indicador {codigo}"):
+                st.session_state.anotacoes_indicadores[codigo] = st.text_area(
+                    f"Anotações para {codigo}",
+                    value=st.session_state.anotacoes_indicadores.get(codigo, ""),
+                    height=80,
+                    key=f"nota_{codigo}",
+                    label_visibility="collapsed",
+                    placeholder="Registre uma justificativa, evidência ou dúvida específica deste indicador.",
+                )
 
     col1, col2 = st.columns(2)
 
@@ -507,10 +773,21 @@ elif st.session_state.etapa == 3:
         st.write(f"**ID:** {cadastro['id_proposta']}")
         st.write(f"**Título:** {cadastro['titulo']}")
         st.write(f"**Proponente:** {cadastro['proponente']}")
+        st.write(f"**Equipe:** {', '.join(cadastro.get('nomes_equipe', [])) if cadastro.get('nomes_equipe') else cadastro.get('equipe', 'Não informada')}")
         st.write(f"**Unidade:** {cadastro['nome_unidade']}")
         st.write(f"**Área temática:** {cadastro['nome_area_tematica']}")
+        st.write(
+            f"**Resultados esperados:** {', '.join(cadastro.get('tipos_resultados', [])) if cadastro.get('tipos_resultados') else cadastro.get('tipo_resultado', 'Não informado')}"
+        )
+        if cadastro.get("categorias_resultados") or cadastro.get("categoria_resultado"):
+            categorias = cadastro.get("categorias_resultados", [])
+            st.write(f"**Categorias dos resultados:** {', '.join(categorias) if categorias else cadastro['categoria_resultado']}")
         st.write(f"**Parceiros:** {', '.join(cadastro['nomes_parceiros']) if cadastro['nomes_parceiros'] else 'Nenhum'}")
         st.write(f"**Públicos-alvo:** {', '.join(cadastro['nomes_publicos']) if cadastro['nomes_publicos'] else 'Nenhum'}")
+        if cadastro.get("anotacoes"):
+            st.write(f"**Anotações:** {cadastro['anotacoes']}")
+        if cadastro.get("consideracoes"):
+            st.write(f"**Considerações adicionais:** {cadastro['consideracoes']}")
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Impacto potencial", indices["impacto_potencial"])
@@ -524,15 +801,15 @@ elif st.session_state.etapa == 3:
 
         with col_esq:
             st.markdown("#### Pontuação por dimensão")
-            st.dataframe(df_dimensoes, use_container_width=True)
+            st.dataframe(df_dimensoes, width="stretch")
 
         with col_dir:
             st.markdown("#### Perfil de impacto")
             fig = gerar_radar(dim_scores)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         st.markdown("#### Respostas detalhadas")
-        st.dataframe(df_respostas, use_container_width=True)
+        st.dataframe(df_respostas, width="stretch")
 
         b1, b2, b3 = st.columns(3)
 
@@ -549,8 +826,18 @@ elif st.session_state.etapa == 3:
                     dim_scores=dim_scores,
                     indices=indices,
                 )
+                supabase_ok, supabase_msg = salvar_historico_supabase(
+                    cadastro=st.session_state.cadastro,
+                    scores=st.session_state.scores,
+                    dim_scores=dim_scores,
+                    indices=indices,
+                )
                 st.session_state.avaliacao_salva = True
-                st.success("Avaliação salva no histórico com sucesso.")
+                st.success("Avaliação salva no histórico local com sucesso.")
+                if supabase_ok:
+                    st.success(supabase_msg)
+                else:
+                    st.info(supabase_msg)
 
         with b3:
             if st.button("Continuar para exportação"):
@@ -574,7 +861,8 @@ elif st.session_state.etapa == 4:
         cadastro = st.session_state.cadastro
 
         st.markdown("### Resumo da proposta")
-        st.json(cadastro)
+        st.dataframe(montar_resumo_cadastro(cadastro), width="stretch", hide_index=True)
+        st.markdown("### Arquivos para download")
 
         json_data = {
             "cadastro": cadastro,
@@ -612,7 +900,7 @@ elif st.session_state.etapa == 4:
         if df_historico.empty:
             st.write("Ainda não há histórico salvo.")
         else:
-            st.dataframe(df_historico, use_container_width=True)
+            st.dataframe(df_historico, width="stretch")
 
             historico_csv_bytes = df_historico.to_csv(index=False).encode("utf-8-sig")
             st.download_button(
