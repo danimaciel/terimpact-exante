@@ -1398,7 +1398,7 @@ elif st.session_state.etapa == 3:
         st.markdown("#### Respostas detalhadas")
         st.dataframe(df_respostas, width="stretch")
 
-        b1, b2, b3 = st.columns(3)
+        b1, b2 = st.columns([1, 1])
 
         with b1:
             if st.button("Voltar para avaliação"):
@@ -1406,33 +1406,18 @@ elif st.session_state.etapa == 3:
                 st.rerun()
 
         with b2:
-            if st.button("Salvar avaliação no histórico"):
-                salvar_historico_csv(
-                    cadastro=st.session_state.cadastro,
-                    scores=st.session_state.scores,
-                    dim_scores=dim_scores,
-                    indices=indices,
-                )
-                supabase_ok, supabase_msg = salvar_historico_supabase(
-                    cadastro=st.session_state.cadastro,
-                    scores=st.session_state.scores,
-                    dim_scores=dim_scores,
-                    indices=indices,
-                )
-                st.session_state.avaliacao_salva = True
-                st.success("Avaliação salva no histórico local com sucesso.")
-                if supabase_ok:
-                    st.success(supabase_msg)
+            if st.button("Enviar", type="primary"):
+                ok, msg = salvar_proposta_workflow(st.session_state.cadastro, status="enviada_cti")
+                if ok:
+                    st.session_state.avaliacao_salva = True
+                    st.success("Proposta enviada ao CTI.")
+                    st.info("O aviso por email ao CTI ainda não está ativado. Por enquanto, o CTI verá a proposta na fila do próprio app.")
                 else:
-                    st.info(supabase_msg)
-
-        with b3:
-            if st.button("Continuar para exportação"):
-                st.session_state.etapa = 4
-                st.rerun()
+                    st.error("Não foi possível enviar a proposta ao CTI.")
+                    st.code(msg)
 
         if st.session_state.avaliacao_salva:
-            st.info("Esta avaliação já foi salva no histórico nesta sessão.")
+            st.info("Esta proposta já foi enviada nesta sessão.")
 
 # =========================================================
 # ETAPA 4
@@ -1461,7 +1446,7 @@ elif st.session_state.etapa == 4:
                     st.error("Não foi possível salvar o rascunho.")
                     st.code(msg)
         with col_enviar:
-            if st.button("Enviar proposta ao CTI", type="primary"):
+            if st.button("Enviar", type="primary"):
                 ok, msg = salvar_proposta_workflow(cadastro, status="enviada_cti")
                 if ok:
                     st.success(msg)

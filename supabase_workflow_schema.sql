@@ -216,6 +216,18 @@ alter table public.indices_avaliacao enable row level security;
 alter table public.tramitacoes enable row level security;
 alter table public.comentarios enable row level security;
 
+grant usage on schema public to authenticated;
+
+grant select, insert, update, delete
+on public.profiles,
+   public.propostas,
+   public.proposta_resultados,
+   public.respostas_indicadores,
+   public.indices_avaliacao,
+   public.tramitacoes,
+   public.comentarios
+to authenticated;
+
 create or replace function public.current_user_role()
 returns public.user_role
 language sql
@@ -225,6 +237,8 @@ set search_path = public
 as $$
     select papel from public.profiles where id = auth.uid() and ativo = true
 $$;
+
+grant execute on function public.current_user_role() to authenticated;
 
 drop policy if exists "profiles_select_own_or_admin" on public.profiles;
 create policy "profiles_select_own_or_admin"
