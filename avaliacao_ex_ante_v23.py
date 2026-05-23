@@ -664,6 +664,100 @@ def carregar_propostas_workflow():
     return pd.DataFrame(dados or []), ""
 
 
+def carregar_proposta_workflow(proposta_id):
+    ok, propostas, erro = request_supabase(
+        "GET",
+        "propostas",
+        params={"id": "eq." + proposta_id, "select": "*"},
+    )
+    if not ok:
+        return False, erro
+    if not propostas:
+        return False, "Proposta não encontrada."
+
+    proposta = propostas[0]
+    ok_resultados, resultados, erro_resultados = request_supabase(
+        "GET",
+        "proposta_resultados",
+        params={"proposta_id": "eq." + proposta_id, "select": "*", "order": "tipo_resultado.asc"},
+    )
+    if not ok_resultados:
+        return False, erro_resultados
+
+    ok_respostas, respostas, erro_respostas = request_supabase(
+        "GET",
+        "respostas_indicadores",
+        params={"proposta_id": "eq." + proposta_id, "etapa": "eq.proponente", "select": "*"},
+    )
+    if not ok_respostas:
+        return False, erro_respostas
+
+    resultados = resultados or []
+    respostas = respostas or []
+    detalhes = {r.get("tipo_resultado", ""): r.get("detalhamento", "") for r in resultados}
+
+    st.session_state.proposta_workflow_id = proposta_id
+    st.session_state.resultado_detalhes = detalhes
+    st.session_state.cadastro = {
+        "id_proposta": proposta.get("codigo", gerar_id_proposta()),
+        "titulo": proposta.get("titulo", ""),
+        "proponente": proposta.get("proponente_nome", ""),
+        "equipe": " | ".join(proposta.get("equipe") or []),
+        "ids_equipe": [],
+        "nomes_equipe": proposta.get("equipe") or [],
+        "id_unidade": "",
+        "nome_unidade": proposta.get("unidade", ""),
+        "id_area_tematica": "",
+        "nome_area_tematica": proposta.get("area_tematica", ""),
+        "portfolio": proposta.get("portfolio", ""),
+        "tipo_proposta": proposta.get("tipo_proposta", ""),
+        "ids_resultados": [r.get("id_resultado", "") for r in resultados],
+        "categorias_resultados": [r.get("categoria_resultado", "") for r in resultados],
+        "tipos_resultados": [r.get("tipo_resultado", "") for r in resultados],
+        "comprovantes_resultados": [r.get("comprovante_resultado", "") for r in resultados],
+        "exemplos_resultados": [r.get("exemplos_resultado", "") for r in resultados],
+        "detalhes_resultados": detalhes,
+        "id_resultado": " | ".join([r.get("id_resultado", "") for r in resultados if r.get("id_resultado")]),
+        "categoria_resultado": " | ".join([r.get("categoria_resultado", "") for r in resultados if r.get("categoria_resultado")]),
+        "tipo_resultado": " | ".join([r.get("tipo_resultado", "") for r in resultados if r.get("tipo_resultado")]),
+        "comprovante_resultado": " | ".join([r.get("comprovante_resultado", "") for r in resultados if r.get("comprovante_resultado")]),
+        "exemplos_resultado": " | ".join([r.get("exemplos_resultado", "") for r in resultados if r.get("exemplos_resultado")]),
+        "duracao_meses": proposta.get("duracao_meses") or 36,
+        "valor_solicitado": float(proposta.get("valor_solicitado") or 0.0),
+        "ids_parceiros": [],
+        "nomes_parceiros": proposta.get("parceiros") or [],
+        "ids_publicos": [],
+        "nomes_publicos": proposta.get("publicos_alvo") or [],
+        "resumo": proposta.get("resumo", ""),
+        "anotacoes": proposta.get("anotacoes_proponente", ""),
+        "consideracoes": proposta.get("consideracoes", ""),
+        "data_avaliacao": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+
+    if respostas:
+        st.session_state.scores = {q["codigo"]: 3 for q in QUESTOES}
+        st.session_state.scores.update({
+            r.get("codigo"): int(r.get("nota") or 3)
+            for r in respostas
+            if r.get("codigo")
+        })
+        st.session_state.anotacoes_indicadores = {q["codigo"]: "" for q in QUESTOES}
+        st.session_state.anotacoes_indicadores.update({
+            r.get("codigo"): r.get("anotacao", "")
+            for r in respostas
+            if r.get("codigo")
+        })
+        st.session_state.resultados_calculados = True
+    else:
+        st.session_state.scores = {q["codigo"]: 3 for q in QUESTOES}
+        st.session_state.anotacoes_indicadores = {q["codigo"]: "" for q in QUESTOES}
+        st.session_state.resultados_calculados = False
+
+    st.session_state.avaliacao_salva = False
+    st.session_state.etapa = 1
+    return True, ""
+
+
 STATUS_PROPOSTA_LABELS = {
     "rascunho": "Rascunho",
     "enviada_cti": "Enviada ao CTI",
@@ -732,6 +826,21 @@ def exibir_painel_workflow():
     ]
     colunas = [c for c in colunas if c in df_view.columns]
     st.dataframe(df_view[colunas], width="stretch", hide_index=True)
+
+    if papel == "proponente":
+        editaveis = df_propostas[df_propostas["status"].isin(["rascunho", "ajuste_solicitado"])].copy()
+        if not editaveis.empty:
+            st.markdown("### Editar proposta salva")
+            editaveis["opcao_edicao"] = editaveis["codigo"] + " - " + editaveis["titulo"].fillna("")
+            opcoes_edicao = dict(zip(editaveis["opcao_edicao"], editaveis["id"]))
+            proposta_edicao = st.selectbox("Escolha uma proposta em rascunho ou ajuste solicitado", list(opcoes_edicao.keys()))
+            if st.button("Editar proposta"):
+                ok, msg = carregar_proposta_workflow(opcoes_edicao[proposta_edicao])
+                if ok:
+                    st.rerun()
+                else:
+                    st.error("Não foi possível abrir a proposta para edição.")
+                    st.code(msg)
 
     st.download_button(
         "Baixar fila em CSV",
@@ -1398,7 +1507,7 @@ elif st.session_state.etapa == 3:
         st.markdown("#### Respostas detalhadas")
         st.dataframe(df_respostas, width="stretch")
 
-        b1, b2 = st.columns([1, 1])
+        b1, b2, b3 = st.columns([1, 1, 1])
 
         with b1:
             if st.button("Voltar para avaliação"):
@@ -1406,6 +1515,16 @@ elif st.session_state.etapa == 3:
                 st.rerun()
 
         with b2:
+            if st.button("Salvar proposta"):
+                ok, msg = salvar_proposta_workflow(st.session_state.cadastro, status="rascunho")
+                if ok:
+                    st.success("Proposta salva como rascunho.")
+                    st.info("Ela ficará disponível em Minhas propostas para continuar depois.")
+                else:
+                    st.error("Não foi possível salvar a proposta.")
+                    st.code(msg)
+
+        with b3:
             if st.button("Enviar", type="primary"):
                 ok, msg = salvar_proposta_workflow(st.session_state.cadastro, status="enviada_cti")
                 if ok:
@@ -1438,12 +1557,12 @@ elif st.session_state.etapa == 4:
         st.markdown("### Tramitação")
         col_rascunho, col_enviar = st.columns(2)
         with col_rascunho:
-            if st.button("Salvar rascunho no banco"):
+            if st.button("Salvar proposta"):
                 ok, msg = salvar_proposta_workflow(cadastro, status="rascunho")
                 if ok:
-                    st.success(msg)
+                    st.success("Proposta salva como rascunho.")
                 else:
-                    st.error("Não foi possível salvar o rascunho.")
+                    st.error("Não foi possível salvar a proposta.")
                     st.code(msg)
         with col_enviar:
             if st.button("Enviar", type="primary"):
