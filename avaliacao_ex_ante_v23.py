@@ -129,6 +129,9 @@ if "avaliacao_salva" not in st.session_state:
 if "anotacoes_indicadores" not in st.session_state:
     st.session_state.anotacoes_indicadores = {}
 
+if "admin_autenticado" not in st.session_state:
+    st.session_state.admin_autenticado = False
+
 # =========================================================
 # QUESTÕES
 # =========================================================
@@ -391,6 +394,83 @@ def salvar_historico_supabase(cadastro, scores, dim_scores, indices):
         return False, f"Não foi possível salvar no Supabase: {erro}"
 
 
+def carregar_avaliacoes_supabase():
+    config = obter_config_supabase()
+    if not config:
+        return pd.DataFrame(), "Supabase não configurado em st.secrets."
+
+    endpoint = f"{config['url']}/rest/v1/{config['tabela']}"
+    headers = {
+        "apikey": config["chave"],
+        "Authorization": f"Bearer {config['chave']}",
+    }
+    params = {
+        "select": "*",
+        "order": "created_at.desc",
+    }
+
+    try:
+        resposta = requests.get(endpoint, headers=headers, params=params, timeout=15)
+        resposta.raise_for_status()
+        registros = resposta.json()
+    except requests.RequestException as erro:
+        return pd.DataFrame(), f"Não foi possível consultar o Supabase: {erro}"
+
+    linhas = []
+    for registro in registros:
+        cadastro = registro.get("cadastro") or {}
+        indices_reg = registro.get("indices") or {}
+        dim_scores_reg = registro.get("dim_scores") or {}
+        linhas.append(
+            {
+                "created_at": registro.get("created_at", ""),
+                "id_proposta": registro.get("id_proposta", ""),
+                "titulo": registro.get("titulo", ""),
+                "proponente": registro.get("proponente", ""),
+                "unidade": cadastro.get("nome_unidade", ""),
+                "area_tematica": cadastro.get("nome_area_tematica", ""),
+                "portfolio": cadastro.get("portfolio", ""),
+                "tipo_proposta": cadastro.get("tipo_proposta", ""),
+                "resultados": " | ".join(cadastro.get("tipos_resultados", [])) or cadastro.get("tipo_resultado", ""),
+                "indice_estrategico": indices_reg.get("indice_estrategico", ""),
+                "classificacao": indices_reg.get("classificacao", ""),
+                "impacto_potencial": indices_reg.get("impacto_potencial", ""),
+                "maturidade_trajetoria": indices_reg.get("maturidade_trajetoria", ""),
+                "capacidade_institucional": indices_reg.get("capacidade_institucional", ""),
+                "dimensoes": json.dumps(dim_scores_reg, ensure_ascii=False),
+                "cadastro_json": json.dumps(cadastro, ensure_ascii=False),
+                "scores_json": json.dumps(registro.get("scores") or {}, ensure_ascii=False),
+                "anotacoes_indicadores_json": json.dumps(registro.get("anotacoes_indicadores") or {}, ensure_ascii=False),
+            }
+        )
+
+    return pd.DataFrame(linhas), ""
+
+
+def admin_autenticado():
+    try:
+        senha_configurada = st.secrets.get("ADMIN_PASSWORD", "")
+    except Exception:
+        senha_configurada = ""
+
+    if not senha_configurada:
+        st.warning("Painel administrativo sem senha configurada. Defina ADMIN_PASSWORD em st.secrets.")
+        return False
+
+    if st.session_state.get("admin_autenticado", False):
+        return True
+
+    senha = st.text_input("Senha administrativa", type="password")
+    if st.button("Acessar painel"):
+        if senha == senha_configurada:
+            st.session_state.admin_autenticado = True
+            st.rerun()
+        else:
+            st.error("Senha incorreta.")
+
+    return False
+
+
 def carregar_historico(caminho_csv=HISTORICO_CSV):
     if os.path.exists(caminho_csv):
         return pd.read_csv(caminho_csv)
@@ -460,10 +540,17 @@ nomes_etapas = {
     2: "Avaliação",
     3: "Resultados",
     4: "Exportação",
+    5: "Governança",
 }
 
-st.progress(st.session_state.etapa / 4)
-st.markdown(f"**Etapa {st.session_state.etapa} de 4 — {nomes_etapas[st.session_state.etapa]}**")
+col_status, col_admin = st.columns([4, 1])
+with col_status:
+    st.progress(st.session_state.etapa / 5)
+    st.markdown(f"**Etapa {st.session_state.etapa} de 5 — {nomes_etapas[st.session_state.etapa]}**")
+with col_admin:
+    if st.button("Governança"):
+        st.session_state.etapa = 5
+        st.rerun()
 
 # =========================================================
 # ETAPA 1
@@ -921,7 +1008,7 @@ elif st.session_state.etapa == 4:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
             if st.button("Voltar para resultados"):
@@ -929,6 +1016,89 @@ elif st.session_state.etapa == 4:
                 st.rerun()
 
         with col2:
+            if st.button("Abrir painel de governança"):
+                st.session_state.etapa = 5
+                st.rerun()
+
+        with col3:
             if st.button("Iniciar nova avaliação"):
                 resetar_avaliacao()
+                st.rerun()
+
+# =========================================================
+# ETAPA 5
+# =========================================================
+elif st.session_state.etapa == 5:
+    st.subheader("Etapa 5 — Governança das avaliações")
+    st.caption("Área administrativa para consultar, filtrar e exportar avaliações salvas no Supabase.")
+
+    if admin_autenticado():
+        df_avaliacoes, erro_supabase = carregar_avaliacoes_supabase()
+
+        if erro_supabase:
+            st.error(erro_supabase)
+        elif df_avaliacoes.empty:
+            st.info("Ainda não há avaliações salvas no Supabase.")
+        else:
+            total = len(df_avaliacoes)
+            media_indice = pd.to_numeric(df_avaliacoes["indice_estrategico"], errors="coerce").mean()
+            ultima_data = df_avaliacoes["created_at"].max()
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Avaliações salvas", total)
+            c2.metric("Índice médio", round(media_indice, 2) if pd.notna(media_indice) else "-")
+            c3.metric("Último registro", str(ultima_data)[:19])
+
+            texto_busca = st.text_input("Buscar por título, proponente, unidade ou ID")
+            df_filtrado = df_avaliacoes.copy()
+            if texto_busca.strip():
+                busca = texto_busca.strip().lower()
+                colunas_busca = ["id_proposta", "titulo", "proponente", "unidade", "area_tematica", "portfolio"]
+                mascara = df_filtrado[colunas_busca].fillna("").apply(
+                    lambda linha: linha.astype(str).str.lower().str.contains(busca).any(),
+                    axis=1,
+                )
+                df_filtrado = df_filtrado[mascara]
+
+            colunas_visiveis = [
+                "created_at",
+                "id_proposta",
+                "titulo",
+                "proponente",
+                "unidade",
+                "area_tematica",
+                "portfolio",
+                "resultados",
+                "indice_estrategico",
+                "classificacao",
+            ]
+            st.dataframe(df_filtrado[colunas_visiveis], width="stretch", hide_index=True)
+
+            csv_admin = df_filtrado.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="Baixar avaliações filtradas (CSV)",
+                data=csv_admin,
+                file_name="avaliacoes_terimpact.csv",
+                mime="text/csv",
+            )
+
+            output_admin = BytesIO()
+            with pd.ExcelWriter(output_admin, engine="openpyxl") as writer:
+                df_filtrado.to_excel(writer, sheet_name="Avaliações", index=False)
+
+            st.download_button(
+                label="Baixar avaliações filtradas (Excel)",
+                data=output_admin.getvalue(),
+                file_name="avaliacoes_terimpact.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Voltar para dados da proposta"):
+                st.session_state.etapa = 1
+                st.rerun()
+        with col2:
+            if st.button("Sair do painel administrativo"):
+                st.session_state.admin_autenticado = False
                 st.rerun()
