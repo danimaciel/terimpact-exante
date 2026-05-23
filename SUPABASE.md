@@ -65,3 +65,16 @@ Estados previstos para uma proposta:
 - `arquivada`
 
 Essa estrutura deve ser aplicada antes de migrar o app para login com Supabase Auth. A tabela simples `avaliacoes` continua existindo para compatibilidade com a versão atual.
+
+## 7. Login no app
+
+O app usa o Supabase Auth com email e senha.
+
+Regras adotadas:
+
+- apenas emails terminados em `@embrapa.br` podem criar conta ou entrar;
+- novos usuários são criados como `proponente`;
+- os papéis `cti`, `tt` e `admin` devem ser atribuídos na tabela `profiles`;
+- a confirmação de email pode permanecer ativa no Supabase.
+
+Para alterar um papel manualmente, abra a tabela `profiles` no Supabase e edite a coluna `papel`.

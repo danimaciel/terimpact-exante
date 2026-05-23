@@ -24,6 +24,7 @@ PARCEIROS_CSV = "parceiros.csv"
 PUBLICOS_CSV = "publicos.csv"
 EMPREGADOS_CSV = "empregados.csv"
 RESULTADOS_CSV = "resultados_embrapa.csv"
+DOMINIO_EMAIL_PERMITIDO = "@embrapa.br"
 
 
 def gerar_id_proposta():
@@ -131,6 +132,18 @@ if "anotacoes_indicadores" not in st.session_state:
 
 if "admin_autenticado" not in st.session_state:
     st.session_state.admin_autenticado = False
+
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None
+
+if "access_token" not in st.session_state:
+    st.session_state.access_token = ""
+
+if "refresh_token" not in st.session_state:
+    st.session_state.refresh_token = ""
+
+if "user_profile" not in st.session_state:
+    st.session_state.user_profile = None
 
 # =========================================================
 # QUESTÕES
@@ -363,6 +376,156 @@ def obter_config_supabase():
     }
 
 
+def email_permitido(email):
+    return email.strip().lower().endswith(DOMINIO_EMAIL_PERMITIDO)
+
+
+def headers_supabase(token=None, prefer=None):
+    config = obter_config_supabase()
+    if not config:
+        return None
+
+    headers = {
+        "apikey": config["chave"],
+        "Authorization": f"Bearer {token or config['chave']}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def criar_conta_supabase(email, senha, nome):
+    config = obter_config_supabase()
+    if not config:
+        return False, "Supabase não configurado em st.secrets."
+
+    if not email_permitido(email):
+        return False, f"Use um email institucional com domínio {DOMINIO_EMAIL_PERMITIDO}."
+
+    payload = {
+        "email": email.strip().lower(),
+        "password": senha,
+        "data": {
+            "nome": nome.strip(),
+            "papel": "proponente",
+        },
+    }
+    try:
+        resposta = requests.post(
+            f"{config['url']}/auth/v1/signup",
+            headers=headers_supabase(),
+            json=payload,
+            timeout=15,
+        )
+        if resposta.status_code >= 400:
+            detalhe = resposta.json().get("msg", resposta.text)
+            return False, f"Não foi possível criar a conta: {detalhe}"
+        return True, "Conta criada. Verifique seu email para confirmar o cadastro antes de entrar."
+    except requests.RequestException as erro:
+        return False, f"Falha ao criar conta: {erro}"
+
+
+def login_supabase(email, senha):
+    config = obter_config_supabase()
+    if not config:
+        return False, "Supabase não configurado em st.secrets."
+
+    if not email_permitido(email):
+        return False, f"Use um email institucional com domínio {DOMINIO_EMAIL_PERMITIDO}."
+
+    payload = {
+        "email": email.strip().lower(),
+        "password": senha,
+    }
+    try:
+        resposta = requests.post(
+            f"{config['url']}/auth/v1/token?grant_type=password",
+            headers=headers_supabase(),
+            json=payload,
+            timeout=15,
+        )
+        if resposta.status_code >= 400:
+            detalhe = resposta.json().get("error_description", resposta.text)
+            return False, f"Não foi possível entrar: {detalhe}"
+
+        dados = resposta.json()
+        st.session_state.auth_user = dados.get("user", {})
+        st.session_state.access_token = dados.get("access_token", "")
+        st.session_state.refresh_token = dados.get("refresh_token", "")
+        st.session_state.user_profile = carregar_profile_usuario(st.session_state.access_token)
+        return True, "Login realizado."
+    except requests.RequestException as erro:
+        return False, f"Falha ao entrar: {erro}"
+
+
+def carregar_profile_usuario(token):
+    config = obter_config_supabase()
+    if not config or not token:
+        return None
+
+    try:
+        resposta = requests.get(
+            f"{config['url']}/rest/v1/profiles",
+            headers=headers_supabase(token),
+            params={"select": "*", "id": "eq." + st.session_state.auth_user.get("id", "")},
+            timeout=15,
+        )
+        if resposta.status_code >= 400:
+            return None
+        registros = resposta.json()
+        return registros[0] if registros else None
+    except requests.RequestException:
+        return None
+
+
+def usuario_logado():
+    return bool(st.session_state.get("access_token") and st.session_state.get("auth_user"))
+
+
+def sair():
+    st.session_state.auth_user = None
+    st.session_state.access_token = ""
+    st.session_state.refresh_token = ""
+    st.session_state.user_profile = None
+    st.session_state.admin_autenticado = False
+    resetar_avaliacao()
+
+
+def exibir_autenticacao():
+    st.subheader("Acesso ao TerImpact")
+    st.caption(f"Use seu email institucional {DOMINIO_EMAIL_PERMITIDO}.")
+
+    aba_login, aba_cadastro = st.tabs(["Entrar", "Criar conta"])
+
+    with aba_login:
+        email_login = st.text_input("Email institucional", key="login_email")
+        senha_login = st.text_input("Senha", type="password", key="login_senha")
+        if st.button("Entrar"):
+            ok, msg = login_supabase(email_login, senha_login)
+            if ok:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
+
+    with aba_cadastro:
+        nome_cadastro = st.text_input("Nome completo", key="cadastro_nome")
+        email_cadastro = st.text_input("Email institucional", key="cadastro_email")
+        senha_cadastro = st.text_input("Senha", type="password", key="cadastro_senha")
+        if st.button("Criar conta"):
+            if len(senha_cadastro) < 8:
+                st.error("Use uma senha com pelo menos 8 caracteres.")
+            else:
+                ok, msg = criar_conta_supabase(email_cadastro, senha_cadastro, nome_cadastro)
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+
+    st.stop()
+
+
 def salvar_historico_supabase(cadastro, scores, dim_scores, indices):
     config = obter_config_supabase()
     if not config:
@@ -448,6 +611,10 @@ def carregar_avaliacoes_supabase():
 
 
 def admin_autenticado():
+    perfil = st.session_state.get("user_profile") or {}
+    if perfil.get("papel") == "admin":
+        return True
+
     try:
         senha_configurada = st.secrets.get("ADMIN_PASSWORD", "")
     except Exception:
@@ -535,6 +702,22 @@ df_historico = carregar_historico()
 st.title("Avaliação ex ante de propostas – Embrapa Territorial")
 st.caption("Versão 2.3 – fluxo guiado + histórico + tabelas-base relacionais")
 
+if not usuario_logado():
+    exibir_autenticacao()
+
+perfil_usuario = st.session_state.get("user_profile") or {}
+email_usuario = (st.session_state.get("auth_user") or {}).get("email", "")
+nome_usuario = perfil_usuario.get("nome") or email_usuario
+papel_usuario = perfil_usuario.get("papel", "proponente")
+
+col_usuario, col_sair = st.columns([4, 1])
+with col_usuario:
+    st.caption(f"Usuário: {nome_usuario} | Perfil: {papel_usuario}")
+with col_sair:
+    if st.button("Sair"):
+        sair()
+        st.rerun()
+
 nomes_etapas = {
     1: "Dados da proposta",
     2: "Avaliação",
@@ -587,15 +770,10 @@ if st.session_state.etapa == 1:
 
     with col1:
         titulo = st.text_input("Título da proposta", value=cadastro_atual["titulo"])
+        proponente = st.text_input("Proponente", value=nome_usuario, disabled=True)
 
         if empregados_opcoes:
             nomes_empregados = list(empregados_opcoes.keys())
-            proponente = st.selectbox(
-                "Nome do proponente",
-                options=[""] + nomes_empregados,
-                index=([""] + nomes_empregados).index(cadastro_atual["proponente"])
-                if cadastro_atual["proponente"] in ([""] + nomes_empregados) else 0
-            )
             equipe_sel = st.multiselect(
                 "Equipe responsável",
                 options=nomes_empregados,
@@ -609,7 +787,6 @@ if st.session_state.etapa == 1:
                 equipe_preview = df_empregados[df_empregados["nome_empregado"].isin(equipe_sel)][colunas_equipe]
                 st.dataframe(equipe_preview, width="stretch", hide_index=True)
         else:
-            proponente = st.text_input("Nome do proponente", value=cadastro_atual["proponente"])
             equipe_texto = st.text_input("Equipe responsável (tabela não carregada)", value=cadastro_atual["equipe"])
             equipe_sel = [nome.strip() for nome in equipe_texto.split(";") if nome.strip()]
 
