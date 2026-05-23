@@ -80,7 +80,7 @@ df_resultados = carregar_tabela("resultados_embrapa.csv")
 # SESSION STATE
 # =========================================================
 if "etapa" not in st.session_state:
-    st.session_state.etapa = 1
+    st.session_state.etapa = 0
 
 if "scores" not in st.session_state:
     st.session_state.scores = {}
@@ -104,6 +104,7 @@ if "cadastro" not in st.session_state:
         "tipos_resultados": [],
         "comprovantes_resultados": [],
         "exemplos_resultados": [],
+        "detalhes_resultados": {},
         "id_resultado": "",
         "categoria_resultado": "",
         "tipo_resultado": "",
@@ -144,6 +145,12 @@ if "refresh_token" not in st.session_state:
 
 if "user_profile" not in st.session_state:
     st.session_state.user_profile = None
+
+if "proposta_workflow_id" not in st.session_state:
+    st.session_state.proposta_workflow_id = ""
+
+if "resultado_detalhes" not in st.session_state:
+    st.session_state.resultado_detalhes = {}
 
 # =========================================================
 # QUESTÕES
@@ -395,6 +402,31 @@ def headers_supabase(token=None, prefer=None):
     return headers
 
 
+def request_supabase(method, tabela, token=None, params=None, payload=None, prefer=None):
+    config = obter_config_supabase()
+    if not config:
+        return False, None, "Supabase não configurado em st.secrets."
+
+    url = f"{config['url']}/rest/v1/{tabela}"
+    headers = headers_supabase(token or st.session_state.get("access_token"), prefer=prefer)
+    try:
+        resposta = requests.request(
+            method,
+            url,
+            headers=headers,
+            params=params,
+            json=payload,
+            timeout=20,
+        )
+        if resposta.status_code >= 400:
+            return False, None, resposta.text
+        if resposta.text:
+            return True, resposta.json(), ""
+        return True, None, ""
+    except requests.RequestException as erro:
+        return False, None, str(erro)
+
+
 def criar_conta_supabase(email, senha, nome):
     config = obter_config_supabase()
     if not config:
@@ -610,6 +642,264 @@ def carregar_avaliacoes_supabase():
     return pd.DataFrame(linhas), ""
 
 
+def carregar_propostas_workflow():
+    perfil = st.session_state.get("user_profile") or {}
+    papel = perfil.get("papel", "proponente")
+
+    params = {
+        "select": "id,codigo,titulo,proponente_nome,proponente_email,unidade,area_tematica,portfolio,status,current_owner_role,submitted_at,created_at,updated_at",
+        "order": "updated_at.desc",
+    }
+
+    if papel == "proponente":
+        params["created_by"] = "eq." + (st.session_state.get("auth_user") or {}).get("id", "")
+    elif papel == "cti":
+        params["status"] = "in.(enviada_cti,em_analise_cti,devolvida_cti,ajuste_solicitado)"
+    elif papel == "tt":
+        params["status"] = "in.(encaminhada_tt,em_trabalho_tt)"
+
+    ok, dados, erro = request_supabase("GET", "propostas", params=params)
+    if not ok:
+        return pd.DataFrame(), erro
+    return pd.DataFrame(dados or []), ""
+
+
+STATUS_PROPOSTA_LABELS = {
+    "rascunho": "Rascunho",
+    "enviada_cti": "Enviada ao CTI",
+    "em_analise_cti": "Em análise CTI",
+    "ajuste_solicitado": "Ajuste solicitado",
+    "encaminhada_tt": "Encaminhada TT",
+    "em_trabalho_tt": "Em trabalho TT",
+    "devolvida_cti": "Devolvida ao CTI",
+    "finalizada": "Finalizada",
+    "arquivada": "Arquivada",
+}
+
+
+def exibir_painel_workflow():
+    perfil = st.session_state.get("user_profile") or {}
+    papel = perfil.get("papel", "proponente")
+
+    titulos = {
+        "admin": "Todas as propostas",
+        "cti": "Fila CTI",
+        "tt": "Fila TT",
+        "proponente": "Minhas propostas",
+    }
+
+    st.subheader(titulos.get(papel, "Minhas propostas"))
+    st.caption("A governança acontece aqui no app. O Supabase fica como banco de dados, não como tela de trabalho da equipe.")
+
+    col_nova, col_recarregar = st.columns([1, 4])
+    with col_nova:
+        if st.button("Nova proposta", type="primary"):
+            resetar_avaliacao()
+            st.session_state.etapa = 1
+            st.rerun()
+    with col_recarregar:
+        if st.button("Atualizar painel"):
+            st.rerun()
+
+    df_propostas, erro = carregar_propostas_workflow()
+    if erro:
+        st.error("Não foi possível carregar as propostas do Supabase.")
+        st.code(erro)
+        return
+
+    if df_propostas.empty:
+        st.info("Ainda não há propostas nesta fila.")
+        return
+
+    df_view = df_propostas.copy()
+    if "status" in df_view.columns:
+        df_view["status"] = df_view["status"].map(STATUS_PROPOSTA_LABELS).fillna(df_view["status"])
+    if "submitted_at" in df_view.columns:
+        df_view["submitted_at"] = df_view["submitted_at"].fillna("")
+    if "updated_at" in df_view.columns:
+        df_view["updated_at"] = df_view["updated_at"].astype(str).str.slice(0, 19)
+
+    colunas = [
+        "codigo",
+        "titulo",
+        "proponente_nome",
+        "unidade",
+        "portfolio",
+        "status",
+        "current_owner_role",
+        "submitted_at",
+        "updated_at",
+    ]
+    colunas = [c for c in colunas if c in df_view.columns]
+    st.dataframe(df_view[colunas], width="stretch", hide_index=True)
+
+    st.download_button(
+        "Baixar fila em CSV",
+        data=df_view.to_csv(index=False).encode("utf-8-sig"),
+        file_name="propostas_terimpact.csv",
+        mime="text/csv",
+    )
+
+
+def montar_payload_proposta(cadastro, status="rascunho"):
+    auth_user = st.session_state.get("auth_user") or {}
+    return {
+        "codigo": cadastro.get("id_proposta", gerar_id_proposta()),
+        "created_by": auth_user.get("id"),
+        "titulo": cadastro.get("titulo", ""),
+        "proponente_nome": cadastro.get("proponente", ""),
+        "proponente_email": auth_user.get("email", ""),
+        "equipe": cadastro.get("nomes_equipe", []),
+        "unidade": cadastro.get("nome_unidade", ""),
+        "area_tematica": cadastro.get("nome_area_tematica", ""),
+        "portfolio": cadastro.get("portfolio", ""),
+        "tipo_proposta": cadastro.get("tipo_proposta", ""),
+        "duracao_meses": cadastro.get("duracao_meses", 0),
+        "valor_solicitado": cadastro.get("valor_solicitado", 0.0),
+        "parceiros": cadastro.get("nomes_parceiros", []),
+        "publicos_alvo": cadastro.get("nomes_publicos", []),
+        "resumo": cadastro.get("resumo", ""),
+        "anotacoes_proponente": cadastro.get("anotacoes", ""),
+        "consideracoes": cadastro.get("consideracoes", ""),
+        "status": status,
+        "current_owner_role": "cti" if status == "enviada_cti" else "proponente",
+        "submitted_at": datetime.now().isoformat() if status == "enviada_cti" else None,
+    }
+
+
+def salvar_resultados_workflow(proposta_id, cadastro):
+    request_supabase("DELETE", "proposta_resultados", params={"proposta_id": "eq." + proposta_id})
+    detalhes = cadastro.get("detalhes_resultados", {})
+    linhas = []
+    for idx, tipo in enumerate(cadastro.get("tipos_resultados", [])):
+        linhas.append(
+            {
+                "proposta_id": proposta_id,
+                "id_resultado": cadastro.get("ids_resultados", [""] * len(cadastro.get("tipos_resultados", [])))[idx] if idx < len(cadastro.get("ids_resultados", [])) else "",
+                "categoria_resultado": cadastro.get("categorias_resultados", [""] * len(cadastro.get("tipos_resultados", [])))[idx] if idx < len(cadastro.get("categorias_resultados", [])) else "",
+                "tipo_resultado": tipo,
+                "comprovante_resultado": cadastro.get("comprovantes_resultados", [""] * len(cadastro.get("tipos_resultados", [])))[idx] if idx < len(cadastro.get("comprovantes_resultados", [])) else "",
+                "exemplos_resultado": cadastro.get("exemplos_resultados", [""] * len(cadastro.get("tipos_resultados", [])))[idx] if idx < len(cadastro.get("exemplos_resultados", [])) else "",
+                "detalhamento": detalhes.get(tipo, ""),
+            }
+        )
+    if not linhas:
+        return True, ""
+    ok, _, erro = request_supabase("POST", "proposta_resultados", payload=linhas, prefer="return=minimal")
+    return ok, erro
+
+
+def salvar_avaliacao_workflow(proposta_id):
+    auth_user = st.session_state.get("auth_user") or {}
+    scores = st.session_state.scores
+    anotacoes = st.session_state.anotacoes_indicadores
+    dim_scores_atual = calcular_dimensoes(scores)
+    indices_atuais = calcular_indices(dim_scores_atual)
+
+    request_supabase(
+        "DELETE",
+        "respostas_indicadores",
+        params={"proposta_id": "eq." + proposta_id, "etapa": "eq.proponente"},
+    )
+    respostas = []
+    for q in QUESTOES:
+        nota = scores.get(q["codigo"])
+        respostas.append(
+            {
+                "proposta_id": proposta_id,
+                "etapa": "proponente",
+                "codigo": q["codigo"],
+                "dimensao": q["dimensao"],
+                "pergunta": q["pergunta"],
+                "nota": nota,
+                "descricao_resposta": q["opcoes"].get(nota, ""),
+                "anotacao": anotacoes.get(q["codigo"], ""),
+                "created_by": auth_user.get("id"),
+            }
+        )
+
+    if respostas:
+        ok, _, erro = request_supabase(
+            "POST",
+            "respostas_indicadores",
+            payload=respostas,
+            prefer="return=minimal",
+        )
+        if not ok:
+            return False, erro
+
+    request_supabase(
+        "DELETE",
+        "indices_avaliacao",
+        params={"proposta_id": "eq." + proposta_id, "etapa": "eq.proponente"},
+    )
+    ok, _, erro = request_supabase(
+        "POST",
+        "indices_avaliacao",
+        payload={
+            "proposta_id": proposta_id,
+            "etapa": "proponente",
+            "impacto_potencial": indices_atuais["impacto_potencial"],
+            "maturidade_trajetoria": indices_atuais["maturidade_trajetoria"],
+            "capacidade_institucional": indices_atuais["capacidade_institucional"],
+            "indice_estrategico": indices_atuais["indice_estrategico"],
+            "classificacao": indices_atuais["classificacao"],
+            "dimensoes": dim_scores_atual,
+            "calculated_by": auth_user.get("id"),
+        },
+        prefer="return=minimal",
+    )
+    return ok, erro
+
+
+def salvar_proposta_workflow(cadastro, status="rascunho"):
+    proposta_id = st.session_state.get("proposta_workflow_id", "")
+    payload = montar_payload_proposta(cadastro, status=status)
+    if proposta_id:
+        ok, dados, erro = request_supabase(
+            "PATCH",
+            "propostas",
+            params={"id": "eq." + proposta_id},
+            payload=payload,
+            prefer="return=representation",
+        )
+    else:
+        ok, dados, erro = request_supabase("POST", "propostas", payload=payload, prefer="return=representation")
+
+    if not ok:
+        return False, erro
+
+    registro = (dados or [{}])[0]
+    proposta_id = registro.get("id", proposta_id)
+    st.session_state.proposta_workflow_id = proposta_id
+
+    ok_resultados, erro_resultados = salvar_resultados_workflow(proposta_id, cadastro)
+    if not ok_resultados:
+        return False, erro_resultados
+
+    ok_avaliacao, erro_avaliacao = salvar_avaliacao_workflow(proposta_id)
+    if not ok_avaliacao:
+        return False, erro_avaliacao
+
+    if status == "enviada_cti":
+        request_supabase(
+            "POST",
+            "tramitacoes",
+            payload={
+                "proposta_id": proposta_id,
+                "from_status": "rascunho",
+                "to_status": "enviada_cti",
+                "from_role": "proponente",
+                "to_role": "cti",
+                "actor_id": (st.session_state.get("auth_user") or {}).get("id"),
+                "comentario": "Proposta enviada ao CTI pelo proponente.",
+            },
+            prefer="return=minimal",
+        )
+
+    return True, "Proposta enviada ao CTI." if status == "enviada_cti" else "Rascunho salvo."
+
+
 def admin_autenticado():
     perfil = st.session_state.get("user_profile") or {}
     if perfil.get("papel") == "admin":
@@ -648,6 +938,8 @@ def resetar_avaliacao():
     st.session_state.etapa = 1
     st.session_state.resultados_calculados = False
     st.session_state.avaliacao_salva = False
+    st.session_state.proposta_workflow_id = ""
+    st.session_state.resultado_detalhes = {}
     st.session_state.cadastro = {
         "id_proposta": gerar_id_proposta(),
         "titulo": "",
@@ -666,6 +958,7 @@ def resetar_avaliacao():
         "tipos_resultados": [],
         "comprovantes_resultados": [],
         "exemplos_resultados": [],
+        "detalhes_resultados": {},
         "id_resultado": "",
         "categoria_resultado": "",
         "tipo_resultado": "",
@@ -719,6 +1012,7 @@ with col_sair:
         st.rerun()
 
 nomes_etapas = {
+    0: "Painel",
     1: "Dados da proposta",
     2: "Avaliação",
     3: "Resultados",
@@ -728,17 +1022,26 @@ nomes_etapas = {
 
 col_status, col_admin = st.columns([4, 1])
 with col_status:
-    st.progress(st.session_state.etapa / 5)
-    st.markdown(f"**Etapa {st.session_state.etapa} de 5 — {nomes_etapas[st.session_state.etapa]}**")
+    st.progress(max(st.session_state.etapa, 1) / 5)
+    if st.session_state.etapa == 0:
+        st.markdown("**Painel de propostas**")
+    else:
+        st.markdown(f"**Etapa {st.session_state.etapa} de 5 — {nomes_etapas[st.session_state.etapa]}**")
 with col_admin:
-    if st.button("Governança"):
-        st.session_state.etapa = 5
+    if st.button("Painel"):
+        st.session_state.etapa = 0
         st.rerun()
+
+# =========================================================
+# PAINEL
+# =========================================================
+if st.session_state.etapa == 0:
+    exibir_painel_workflow()
 
 # =========================================================
 # ETAPA 1
 # =========================================================
-if st.session_state.etapa == 1:
+elif st.session_state.etapa == 1:
     st.subheader("Etapa 1 — Dados da proposta")
 
     cadastro_atual = st.session_state.cadastro
@@ -857,6 +1160,20 @@ if st.session_state.etapa == 1:
             resultados_sel = [r.strip() for r in resultado_texto.split(";") if r.strip()]
             resultados_info = [{"tipo_resultado": r} for r in resultados_sel]
 
+        detalhes_resultados = {}
+        if resultados_sel:
+            st.markdown("**Detalhamento dos resultados selecionados**")
+            detalhes_atuais = cadastro_atual.get("detalhes_resultados", {}) or st.session_state.resultado_detalhes
+            for resultado in resultados_sel:
+                detalhes_resultados[resultado] = st.text_area(
+                    f"Registro textual associado a: {resultado}",
+                    value=detalhes_atuais.get(resultado, ""),
+                    height=90,
+                    key=f"detalhe_resultado_{resultado}",
+                    placeholder="Descreva como este resultado deve aparecer na proposta, sua finalidade ou observações importantes.",
+                )
+            st.session_state.resultado_detalhes = detalhes_resultados
+
         duracao_meses = st.number_input("Duração prevista (meses)", min_value=0, value=int(cadastro_atual["duracao_meses"]))
         valor_solicitado = st.number_input("Valor solicitado (R$)", min_value=0.0, value=float(cadastro_atual["valor_solicitado"]))
 
@@ -928,6 +1245,7 @@ if st.session_state.etapa == 1:
             "tipos_resultados": tipos_resultados,
             "comprovantes_resultados": comprovantes_resultados,
             "exemplos_resultados": exemplos_resultados,
+            "detalhes_resultados": detalhes_resultados,
             "id_resultado": " | ".join(ids_resultados),
             "categoria_resultado": " | ".join(categorias_resultados),
             "tipo_resultado": " | ".join(tipos_resultados),
@@ -1043,6 +1361,11 @@ elif st.session_state.etapa == 3:
         st.write(
             f"**Resultados esperados:** {', '.join(cadastro.get('tipos_resultados', [])) if cadastro.get('tipos_resultados') else cadastro.get('tipo_resultado', 'Não informado')}"
         )
+        if cadastro.get("detalhes_resultados"):
+            with st.expander("Detalhamento dos resultados"):
+                for resultado, detalhe in cadastro.get("detalhes_resultados", {}).items():
+                    if str(detalhe).strip():
+                        st.write(f"**{resultado}:** {detalhe}")
         if cadastro.get("categorias_resultados") or cadastro.get("categoria_resultado"):
             categorias = cadastro.get("categorias_resultados", [])
             st.write(f"**Categorias dos resultados:** {', '.join(categorias) if categorias else cadastro['categoria_resultado']}")
@@ -1126,6 +1449,27 @@ elif st.session_state.etapa == 4:
 
         st.markdown("### Resumo da proposta")
         st.dataframe(montar_resumo_cadastro(cadastro), width="stretch", hide_index=True)
+
+        st.markdown("### Tramitação")
+        col_rascunho, col_enviar = st.columns(2)
+        with col_rascunho:
+            if st.button("Salvar rascunho no banco"):
+                ok, msg = salvar_proposta_workflow(cadastro, status="rascunho")
+                if ok:
+                    st.success(msg)
+                else:
+                    st.error("Não foi possível salvar o rascunho.")
+                    st.code(msg)
+        with col_enviar:
+            if st.button("Enviar proposta ao CTI", type="primary"):
+                ok, msg = salvar_proposta_workflow(cadastro, status="enviada_cti")
+                if ok:
+                    st.success(msg)
+                    st.info("O aviso por email ao CTI ainda não está ativado. Por enquanto, o CTI verá a proposta na fila do próprio app.")
+                else:
+                    st.error("Não foi possível enviar a proposta ao CTI.")
+                    st.code(msg)
+
         st.markdown("### Arquivos para download")
 
         json_data = {

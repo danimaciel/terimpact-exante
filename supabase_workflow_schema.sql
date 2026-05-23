@@ -80,9 +80,13 @@ create table if not exists public.proposta_resultados (
     tipo_resultado text not null,
     comprovante_resultado text,
     exemplos_resultado text,
+    detalhamento text,
     created_at timestamptz not null default now(),
     unique (proposta_id, tipo_resultado)
 );
+
+alter table public.proposta_resultados
+    add column if not exists detalhamento text;
 
 create table if not exists public.respostas_indicadores (
     id uuid primary key default gen_random_uuid(),
@@ -322,8 +326,14 @@ create policy "indices_manage_by_role"
 on public.indices_avaliacao
 for all
 to authenticated
-using (public.current_user_role() in ('admin', 'cti', 'tt'))
-with check (public.current_user_role() in ('admin', 'cti', 'tt'));
+using (
+    public.current_user_role() in ('admin', 'cti', 'tt')
+    or calculated_by = auth.uid()
+)
+with check (
+    public.current_user_role() in ('admin', 'cti', 'tt')
+    or calculated_by = auth.uid()
+);
 
 drop policy if exists "tramitacoes_select_by_proposta_access" on public.tramitacoes;
 create policy "tramitacoes_select_by_proposta_access"

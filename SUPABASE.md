@@ -38,9 +38,10 @@ No painel, é possível:
 - buscar por título, proponente, unidade, área, portfólio ou ID;
 - baixar os dados filtrados em CSV ou Excel.
 
-## 6. Próxima arquitetura com login e tramitação
+## 6. Arquitetura com login e tramitação
 
 O arquivo `supabase_workflow_schema.sql` prepara o banco para o TerImpact como sistema com perfis e fluxo de trabalho.
+Ele pode ser executado novamente no SQL Editor quando houver ajustes no modelo, pois usa comandos idempotentes sempre que possível.
 
 Ele cria:
 
@@ -64,7 +65,7 @@ Estados previstos para uma proposta:
 - `finalizada`
 - `arquivada`
 
-Essa estrutura deve ser aplicada antes de migrar o app para login com Supabase Auth. A tabela simples `avaliacoes` continua existindo para compatibilidade com a versão atual.
+Essa estrutura sustenta o painel inicial do app: proponentes veem suas propostas, CTI ve propostas enviadas para analise, TT ve propostas encaminhadas, e administradores veem todas. A tabela simples `avaliacoes` continua existindo para compatibilidade com a versão anterior.
 
 ## 7. Login no app
 
