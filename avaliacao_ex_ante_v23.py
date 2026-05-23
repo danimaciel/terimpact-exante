@@ -1006,7 +1006,7 @@ def salvar_proposta_workflow(cadastro, status="rascunho"):
             prefer="return=minimal",
         )
 
-    return True, "Proposta enviada ao CTI." if status == "enviada_cti" else "Rascunho salvo."
+    return True, "Proposta enviada com sucesso." if status == "enviada_cti" else "Rascunho salvo."
 
 
 def admin_autenticado():
@@ -1529,10 +1529,9 @@ elif st.session_state.etapa == 3:
                 ok, msg = salvar_proposta_workflow(st.session_state.cadastro, status="enviada_cti")
                 if ok:
                     st.session_state.avaliacao_salva = True
-                    st.success("Proposta enviada ao CTI.")
-                    st.info("O aviso por email ao CTI ainda não está ativado. Por enquanto, o CTI verá a proposta na fila do próprio app.")
+                    st.success("Proposta enviada com sucesso.")
                 else:
-                    st.error("Não foi possível enviar a proposta ao CTI.")
+                    st.error("Não foi possível enviar a proposta.")
                     st.code(msg)
 
         if st.session_state.avaliacao_salva:
@@ -1568,10 +1567,9 @@ elif st.session_state.etapa == 4:
             if st.button("Enviar", type="primary"):
                 ok, msg = salvar_proposta_workflow(cadastro, status="enviada_cti")
                 if ok:
-                    st.success(msg)
-                    st.info("O aviso por email ao CTI ainda não está ativado. Por enquanto, o CTI verá a proposta na fila do próprio app.")
+                    st.success("Proposta enviada com sucesso.")
                 else:
-                    st.error("Não foi possível enviar a proposta ao CTI.")
+                    st.error("Não foi possível enviar a proposta.")
                     st.code(msg)
 
         st.markdown("### Arquivos para download")
